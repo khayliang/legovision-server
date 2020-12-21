@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 from enum import Enum
+from shapely.geometry import Polygon
 
 class LegoSize(Enum):
     TWO = (0, 90)
@@ -10,8 +11,8 @@ class LegoSize(Enum):
     EIGHT = (180, 10000)
 
 class LegoColor(Enum):
-    GREY = (0, 18, 1)
-    LIGHT_GREY = (18, 30, 1)
+    GREY = (0, 15, 1)
+    LIGHT_GREY = (15, 33, 1)
     LIME = (23,38, 0)
     GREEN = (38,71, 0)
     BLUE = (108, 126, 0)
@@ -28,7 +29,7 @@ class LegoDetector:
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(5,5))
         dilated = cv2.dilate(edges, kernel)
         return dilated
-    
+        
     def generate_contours(self, img):
         cnts, _ = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         return cnts
@@ -39,8 +40,8 @@ class LegoDetector:
             area = cv2.contourArea(c)
             if area < 1000:
                 continue
+
             # approximate the contour
-            peri = cv2.arcLength(c, True)
             rect = cv2.minAreaRect(c)
 
             size = rect[1]
@@ -57,25 +58,35 @@ class LegoDetector:
         return rects
 
     def remove_duplicate_rects(self, rects_1, rects_2):
-        rects_1_range = []
-        final = []
-        range_thresh = 100
-        for rect in rects_1:
-            rect_range = (rect[0][0]-range_thresh/2, rect[0][1]-range_thresh/2,\
-                rect[0][0]+range_thresh/2, rect[0][1]+range_thresh/2,)
-            rects_1_range.append(rect_range)
-            final.append(rect)
-        for rect in rects_2:
-            x, y = rect[0]
+        kinda_final = rects_1
+        iou_thresh = 0.1
+        polygons_1 = [Polygon(box) for box in self.rects_to_boxes(rects_1)]
+        polygons_2 = [Polygon(box) for box in self.rects_to_boxes(rects_2)]
+        final_polygons = polygons_1
+
+        for idx, b in enumerate(polygons_2):
             within = False
-            for rect_range in rects_1_range:
-                if rect_range[0] <= x <= rect_range[2]\
-                    and rect_range[1] <= y <= rect_range[3]:
+            for a in polygons_1:
+                iou = b.intersection(a).area / b.union(a).area
+                if iou > iou_thresh:
                     within = True
                     break
             if not within:
-                final.append(rect)
-                    
+                kinda_final.append(rects_2[idx])
+                final_polygons.append(b)
+        final = []
+        for idx_a, a in enumerate(final_polygons):
+            within = False
+            for idx_b, b in enumerate(final_polygons):
+                iou = 0
+                if idx_a != idx_b:
+                    iou = b.intersection(a).area / b.union(a).area
+                if iou > iou_thresh:
+                    within = True
+                    break
+            if not within:
+                final.append(kinda_final[idx_a])
+
         return final
 
     def rects_to_boxes(self, rects):
@@ -115,6 +126,7 @@ class LegoDetector:
     def get_max_color(self, img):
         hist_hue = cv2.calcHist([img], [0], None, [180], [0,180])
         hist_sat = cv2.calcHist([img], [1], None, [256], [0,256])
+        thresh_amt = 800
         _, _, _, max_hue = cv2.minMaxLoc(hist_hue)
         _, _, _, max_sat = cv2.minMaxLoc(hist_sat)
         max_sat = max_sat[1]
@@ -122,12 +134,13 @@ class LegoDetector:
         for color in LegoColor:
             min_color, max_color, channel = color.value
             if channel == 1:
-                if min_color <= max_sat <= max_color:
+                if min_color <= max_sat <= max_color and \
+                    hist_sat[max_sat] > thresh_amt:
                     return color.name
             if channel == 0:
-                if min_color <= max_hue <= max_color:
+                if min_color <= max_hue <= max_color and \
+                    hist_hue[max_hue] > thresh_amt:
                     return color.name
-
 
     def detect(self, img):
         ori_img = img.copy()
@@ -154,6 +167,7 @@ class LegoDetector:
                 size1=sizes[idx][0], size2=sizes[idx][1]),\
                 (tuple(boxes[idx][3])),\
                 cv2.FONT_HERSHEY_SIMPLEX, 0.3, (255, 0, 0), 1)
+
         items = list(zip(colors, sizes))
         return (ori_img, items)
 
@@ -161,6 +175,6 @@ if __name__ == "__main__":
     img = cv2.imread("test.png")
 
     detector = LegoDetector()
-    result = detector.detect(img)
+    result, items = detector.detect(img)
     cv2.imshow("result", result)
     cv2.waitKey()
