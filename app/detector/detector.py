@@ -7,8 +7,8 @@ class LegoSize(Enum):
     TWO = (0, 90)
     THREE = (90, 110)
     FOUR = (110, 150)
-    SIX = (150, 180)
-    EIGHT = (180, 10000)
+    SIX = (150, 190)
+    EIGHT = (190, 10000)
 
 class LegoColor(Enum):
     GREY = (0, 15, 1)
